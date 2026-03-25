@@ -7,7 +7,6 @@ import os
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-# Keywords that signal C2C / contract roles
 C2C_KEYWORDS = ["c2c", "corp to corp", "corp-to-corp", "contract", "1099"]
 EXPERIENCE_PATTERN = re.compile(r'\d+\+?\s*(?:years?|yrs?)', re.IGNORECASE)
 EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
@@ -67,14 +66,13 @@ def send_telegram(message):
     requests.post(url, json=payload)
 
 def run():
-    # Customize your search terms and location here
     searches = [
         (".Net developer C2C", "United States"),
         (".Net developer corp to corp", "United States"),
         (".Net developer corp-to-corp", "United States"),
         (".Net C2C", "United States"),
-        (".Net corp to corp", "United States"), 
-        (".Net corp-to-corp", "United States"), 
+        (".Net corp to corp", "United States"),
+        (".Net corp-to-corp", "United States"),
         ("dotNet C2C", "United States"),
         ("dotNet corp to corp", "United States"),
         ("dotNet corp-to-corp", "United States"),
@@ -82,25 +80,25 @@ def run():
         ("dot Net corp to corp", "United States"),
         ("dot Net corp-to-corp", "United States"),
     ]
-    
+
     seen_ids = set()
-    
+
     for keyword, location in searches:
         jobs = search_linkedin_jobs(keyword, location, num_jobs=50)
         for job in jobs:
             if job["job_id"] in seen_ids:
                 continue
             seen_ids.add(job["job_id"])
-            
+
             desc = get_job_details(job["job_id"])
             emails, experience, is_c2c = extract_info(desc)
-            
-           if not is_c2c:
-               continue
-            
+
+            if not is_c2c:
+                continue
+
             email_str = ", ".join(emails) if emails else "Not listed"
             exp_str = ", ".join(experience) if experience else "Not listed"
-            
+
             msg = (
                 f"🔔 <b>New C2C Job Alert!</b>\n\n"
                 f"💼 <b>Title:</b> {job['title']}\n"
@@ -110,8 +108,9 @@ def run():
                 f"📧 <b>Contact Email:</b> {email_str}\n"
                 f"🔗 <b>Link:</b> {job['link']}\n"
             )
-            
+
             send_telegram(msg)
+            print(f"Sent: {job['title']} at {job['company']}")
             time.sleep(1)
 
 if __name__ == "__main__":
