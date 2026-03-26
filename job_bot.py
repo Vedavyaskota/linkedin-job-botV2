@@ -3,11 +3,21 @@ from bs4 import BeautifulSoup
 import time
 import re
 import os
+from datetime import datetime, timezone, timedelta
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-C2C_KEYWORDS = ["c2c", "corp to corp", "corp-to-corp", "contract", "1099"]
+# Only these keywords confirm a C2C job
+C2C_KEYWORDS = ["c2c", "corp to corp", "corp-to-corp", "c2c only", "corp2corp"]
+
+# Only these confirm it is a .NET job
+DOTNET_KEYWORDS = [
+    ".net", "dotnet", "dot net", "asp.net", "c#", "csharp",
+    ".net core", ".net developer", ".net engineer", "blazor",
+    "wpf", "winforms", "entity framework"
+]
+
 EXPERIENCE_PATTERN = re.compile(r'\d+\+?\s*(?:years?|yrs?)', re.IGNORECASE)
 EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
@@ -15,9 +25,10 @@ def search_linkedin_jobs(keywords, location, num_jobs=50):
     jobs = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     for start in range(0, num_jobs, 25):
+        # f_TPR=r86400 = posted in last 24 hours
         url = (
             f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-            f"?keywords={keywords}&location={location}&f_JT=C&start={start}"
+            f"?keywords={keywords}&location={location}&f_JT=C&f_TPR=r86400&start={start}"
         )
         try:
             resp = requests.get(url, headers=headers, timeout=10)
@@ -54,50 +65,70 @@ def get_job_details(job_id):
     except:
         return ""
 
+def is_dotnet_job(title, description):
+    text = (title + " " + description).lower()
+    return any(kw in text for kw in DOTNET_KEYWORDS)
+
+def is_c2c_job(description):
+    text = description.lower()
+    return any(kw in text for kw in C2C_KEYWORDS)
+
 def extract_info(description):
     emails = EMAIL_PATTERN.findall(description)
     experience = EXPERIENCE_PATTERN.findall(description)
-    is_c2c = any(kw in description.lower() for kw in C2C_KEYWORDS)
-    return emails, experience, is_c2c
+    return emails, experience
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
-    requests.post(url, json=payload)
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print(f"Telegram error: {e}")
 
 def run():
     searches = [
+        (".Net developer C2C", "United States"),
+        (".Net developer corp to corp", "United States"),
         (".Net C2C", "United States"),
-        (".Net corp to corp", "United States"),
-        (".Net corp-to-corp", "United States"),
         ("dotNet C2C", "United States"),
-        ("dotNet corp to corp", "United States"),
-        ("dotNet corp-to-corp", "United States"),
-        ("dot Net C2C", "United States"),
-        ("dot Net corp to corp", "United States"),
-        ("dot Net corp-to-corp", "United States"),
+        ("C# developer C2C", "United States"),
+        ("ASP.NET C2C", "United States"),
+        (".Net core contract", "United States"),
     ]
 
     seen_ids = set()
+    sent_count = 0
 
     for keyword, location in searches:
+        print(f"Searching: {keyword}")
         jobs = search_linkedin_jobs(keyword, location, num_jobs=50)
+        print(f"Found {len(jobs)} jobs for: {keyword}")
+
         for job in jobs:
             if job["job_id"] in seen_ids:
                 continue
             seen_ids.add(job["job_id"])
 
             desc = get_job_details(job["job_id"])
-            emails, experience, is_c2c = extract_info(desc)
 
-            if not is_c2c:
+            # Filter 1 — must be a .NET job
+            if not is_dotnet_job(job["title"], desc):
+                print(f"Skipped (not .NET): {job['title']}")
                 continue
+
+            # Filter 2 — must mention C2C
+            if not is_c2c_job(desc):
+                print(f"Skipped (no C2C): {job['title']}")
+                continue
+
+            emails, experience = extract_info(desc)
 
             email_str = ", ".join(emails) if emails else "Not listed"
             exp_str = ", ".join(experience) if experience else "Not listed"
 
             msg = (
-                f"🔔 <b>New C2C Job Alert!</b>\n\n"
+                f"🔔 <b>New .NET C2C Job Alert!</b>\n\n"
                 f"💼 <b>Title:</b> {job['title']}\n"
                 f"🏢 <b>Company:</b> {job['company']}\n"
                 f"📍 <b>Location:</b> {job['location']}\n"
@@ -107,8 +138,11 @@ def run():
             )
 
             send_telegram(msg)
-            print(f"Sent: {job['title']} at {job['company']}")
+            sent_count += 1
+            print(f"Sent ({sent_count}): {job['title']} at {job['company']}")
             time.sleep(1)
+
+    print(f"Done. Total sent: {sent_count}")
 
 if __name__ == "__main__":
     run()
